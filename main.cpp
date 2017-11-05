@@ -67,8 +67,6 @@ int main(int argc, char *argv[])
             }
         else
         {
-            while(true)
-            {
                 while((res=pcap_next_ex(fp,&pkt_header,&pkt_data))>=0)
                 {
                     if(res == 0)continue;
@@ -81,7 +79,6 @@ int main(int argc, char *argv[])
                         memcpy(user_mac.mac_address,eh->ether_shost,6);
                         if((ui_iter = user_info.find(user_mac)) != user_info.end())
                         {
-                            break;
                             //생성시간과 현재 시간을 비교하는 함수를 사용해서 time 값을 변경시킬 예정
                         }
                         else
@@ -95,7 +92,6 @@ int main(int argc, char *argv[])
                         memcpy(user_mac.mac_address,eh->ether_dhost,6);
                         if((ui_iter = user_info.find(user_mac)) != user_info.end())
                         {
-                            break;
                             //생성시간과 현재 시간을 비교하는 함수를 사용해서 time 값을 변경시킬 예정
                         }
                         else
@@ -120,7 +116,7 @@ int main(int argc, char *argv[])
 
                 }
             }
-        }
+
     }
 
     return 0;
