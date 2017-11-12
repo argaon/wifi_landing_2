@@ -5,10 +5,12 @@
 #include <cstdio>
 #include <map>
 #include <string.h>
+#include <time.h>
 #include <net/ethernet.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <unistd.h>
 
 
 #define PCAP_OPENFLAG_PROMISCUOUS 1   // Even if it isn't my mac, receive packet
@@ -21,7 +23,7 @@ struct user_info_value uiv;
 struct ether_header *eh;
 struct ip *iph;
 struct tcphdr *tcph;
-
+struct tm *t;
 
 char errbuf[PCAP_ERRBUF_SIZE];
 
@@ -29,11 +31,34 @@ uint8_t mac_changer(const char *ipm,uint8_t *opm) //ipm = inputmac, opm = output
 {
    return sscanf(ipm,"%2hhx:%2hhx:%2hhx:%2hhx:%2hhx:%2hhx",&opm[0],&opm[1],&opm[2],&opm[3],&opm[4],&opm[5]);    //%x cause an error, fix to %2hhx
 }
+void user_check()
+{
+
+}
+
+void print_time(time_t input_time)
+{
+    time_t now;
+    int tm_hour, tm_min, tm_sec;
+    time(&now);
+    double diff_t = difftime(now,input_time);
+    tm_hour = diff_t / (60*60);
+    diff_t -= ( tm_hour *60 *60);
+    tm_min = diff_t / 60;
+    diff_t -= ( tm_min *60);
+    tm_sec = diff_t;
+
+    printf("%d시간 %d분 %d초",tm_hour,tm_min,tm_sec);
+
+
+}
+
 int main(int argc, char *argv[])
 {
     char *dev =  argv[1];
     uint8_t ap_mac[6];
     mac_changer(argv[2],ap_mac);
+
 
     map<Mac,user_info_value>user_info;
     map<Mac,user_info_value>::iterator ui_iter;
@@ -67,50 +92,59 @@ int main(int argc, char *argv[])
             }
         else
         {
-                while((res=pcap_next_ex(fp,&pkt_header,&pkt_data))>=0)
+                while((res=pcap_next_ex(fp,&pkt_header,&pkt_data))>=-1)
                 {
                     if(res == 0)continue;
-                    pkt_length = pkt_header->len;
-
-                    eh = (struct ether_header*)pkt_data;
-
-                    if( memcmp(eh->ether_dhost,ap_mac,6) == 0 )//
+                    if(res == -1)
                     {
-                        memcpy(user_mac.mac_address,eh->ether_shost,6);
-                        if((ui_iter = user_info.find(user_mac)) != user_info.end())
-                        {
-                            //생성시간과 현재 시간을 비교하는 함수를 사용해서 time 값을 변경시킬 예정
-                        }
-                        else
-                        {
-                            uiv.time = 0;
-                        }
-                        user_info.insert(pair<Mac, user_info_value>(user_mac,uiv));
+                        printf("&s is down, after 1sec, restart!\n");
+                        sleep(1);
+                        if((fp= pcap_open_live(dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , 1, errbuf)) == NULL)fprintf(stderr,"Unable to open the adapter. %s is not supported by Pcap\n", dev);
                     }
-                    else if(memcmp(eh->ether_shost,ap_mac,6) == 0)
-                    {
-                        memcpy(user_mac.mac_address,eh->ether_dhost,6);
-                        if((ui_iter = user_info.find(user_mac)) != user_info.end())
-                        {
-                            //생성시간과 현재 시간을 비교하는 함수를 사용해서 time 값을 변경시킬 예정
-                        }
-                        else
-                        {
-                            uiv.time = 0;
-                        }
-                        user_info.insert(pair<Mac, user_info_value>(user_mac,uiv));
-                    }
-                    pkt_data += sizeof(struct ether_header);
-                    pkt_length -= sizeof(struct ether_header);
+                    else{
+                        pkt_length = pkt_header->len;
 
+                        eh = (struct ether_header*)pkt_data;
+
+                        if( memcmp(eh->ether_dhost,ap_mac,6) == 0 )//
+                        {
+                            memcpy(user_mac.mac_address,eh->ether_shost,6);
+                            if((ui_iter = user_info.find(user_mac)) != user_info.end())
+                            {
+                                //생성시간과 현재 시간을 비교하는 함수를 사용해서 time 값을 변경시킬 예정
+                            }
+                            else
+                            {
+                                time(&uiv.time);
+                            }
+                            user_info.insert(pair<Mac, user_info_value>(user_mac,uiv));
+                        }
+                        else if(memcmp(eh->ether_shost,ap_mac,6) == 0)
+                        {
+                            memcpy(user_mac.mac_address,eh->ether_dhost,6);
+                            if((ui_iter = user_info.find(user_mac)) != user_info.end())
+                            {
+                                //생성시간과 현재 시간을 비교하는 함수를 사용해서 time 값을 변경시킬 예정
+                            }
+                            else
+                            {
+                                time(&uiv.time);
+                            }
+                            user_info.insert(pair<Mac, user_info_value>(user_mac,uiv));
+                        }
+                        pkt_data += sizeof(struct ether_header);
+                        pkt_length -= sizeof(struct ether_header);
+
+                    }
+                    //sleep(1);
                     system("clear");
-                    cout<<"User_Mac\t\tTime"<<endl;
+                    cout<<"User_Mac\t\tAfter Connection Time"<<endl;
                     for(ui_iter = user_info.begin(); ui_iter!=user_info.end(); advance(ui_iter,1))
                     {
                         for(i=0;i<5;i++)
                             printf("%02x:",ui_iter->first.mac_address[i]); //beacon info key(bssid)
                         printf("%02x\t",ui_iter->first.mac_address[5]);
-                        printf("%d\t",ui_iter->second.time);
+                        print_time(ui_iter->second.time);
                         cout<<endl;
                     }
 
