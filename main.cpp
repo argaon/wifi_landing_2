@@ -48,6 +48,7 @@ void print_time(time_t input_time)
 
     printf("%d시간 %d분 %d초",tm_hour,tm_min,tm_sec);
 }
+/*
 void send_packet(pcap_t *fp){
     struct pcap_pkthdr *pkt_header;
     const u_char *pkt_data;
@@ -69,6 +70,7 @@ void send_packet(pcap_t *fp){
         }
     }
 }
+*/
 int main(int argc, char *argv[])
 {
     char *dev =  argv[1];
@@ -156,13 +158,18 @@ int main(int argc, char *argv[])
                                         pkt_length -= tcph->doff*4;
                                         if(pkt_length >0)
                                         {
-                                            cout<<"TCP_DATA"<<endl;
                                             string output(reinterpret_cast<char const*>(pkt_data), pkt_length);
                                             smatch m;
                                             bool match = regex_search(output,m,re);
                                             if((match))
                                             {
-                                                send_packet(fp);
+                                                tcph->th_flags = 0x11;
+                                                pkt_data -= sizeof(struct ether_header)+iph->ip_hl*4+tcph->doff*4;
+                                                if(pcap_sendpacket(fp,pkt_data,pkt_header->len)!=0)
+                                                {
+                                                    fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
+                                                }
+                                                cout<<"SEND_FIN_PACKET"<<endl;
                                             }
                                         }
                                     }
