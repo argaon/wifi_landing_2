@@ -5,13 +5,11 @@
 #include <cstdio>
 #include <map>
 #include <string.h>
-#include <time.h>
 #include <net/ethernet.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <regex>
 
 #define PCAP_OPENFLAG_PROMISCUOUS 1   // Even if it isn't my mac, receive packet
 
@@ -23,10 +21,8 @@ struct ip *iph;
 struct tcphdr *tcph;
 
 struct user_info_value uiv;
-struct tm *t;
 
-regex re("GET([^\n]*)"); //GET 으로 시작해서 HTTP/1.1로 끝나는 문자열
-
+//regex re("GET([^\n]*)"); //GET 으로 시작해서 HTTP/1.1로 끝나는 문자열
 
 char errbuf[PCAP_ERRBUF_SIZE];
 
@@ -34,12 +30,11 @@ uint8_t mac_changer(const char *ipm,uint8_t *opm) //ipm = inputmac, opm = output
 {
    return sscanf(ipm,"%2hhx:%2hhx:%2hhx:%2hhx:%2hhx:%2hhx",&opm[0],&opm[1],&opm[2],&opm[3],&opm[4],&opm[5]);    //%x cause an error, fix to %2hhx
 }
-void print_time(time_t input_time)
+void print_time(int input_time,struct timeval tv)
 {
-    time_t now;
     int tm_hour, tm_min, tm_sec;
-    time(&now);
-    double diff_t = difftime(now,input_time);
+    int diff_t = tv.tv_sec - input_time;
+
     tm_hour = diff_t / (60*60);
     diff_t -= ( tm_hour *60 *60);
     tm_min = diff_t / 60;
@@ -48,29 +43,9 @@ void print_time(time_t input_time)
 
     printf("%d시간 %d분 %d초",tm_hour,tm_min,tm_sec);
 }
-/*
-void send_packet(pcap_t *fp){
-    struct pcap_pkthdr *pkt_header;
-    const u_char *pkt_data;
-    int res;
-    while((res=pcap_next_ex(fp,&pkt_header,&pkt_data))>=-1)
-    {
-        if(res == 0)continue;
-        pkt_data += sizeof(struct ether_header)+iph->ip_hl*4;
-        tcph = (struct tcphdr*)pkt_data;
-        tcph->th_flags = 0x11;
-        pkt_data -= sizeof(struct ether_header)+iph->ip_hl*4;
-        if(pcap_sendpacket(fp,pkt_data,pkt_header->len)!=0)
-            {
-                fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
-            }
-        else
-        {
-            break;
-        }
-    }
+bool http_injection(const u_char *pkt_data){
+    return true;
 }
-*/
 int main(int argc, char *argv[])
 {
     char *dev =  argv[1];
@@ -100,7 +75,6 @@ int main(int argc, char *argv[])
         const u_char *pkt_data;
         int res;
         int pkt_length;
-        int i;
 
         pcap_t *fp;
         if((fp= pcap_open_live(dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , 1, errbuf)) == NULL)
@@ -114,9 +88,11 @@ int main(int argc, char *argv[])
                 if(res == 0)continue;
                 if(res == -1)
                 {
+                    pcap_close(fp);
                     printf("%s is down, after 1sec, restart!\n",dev);
                     sleep(1);
                     if((fp= pcap_open_live(dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , 1, errbuf)) == NULL)fprintf(stderr,"Unable to open the adapter. %s is not supported by Pcap\n", dev);
+                    //pcap_datalink(fp);
                 }
                 else
                 {
@@ -135,15 +111,13 @@ int main(int argc, char *argv[])
 
                         if((ui_iter = user_info.find(user_mac)) != user_info.end())
                         {
-                            time_t now;
-                            int tm_hour;
-                            time(&now);
-                            double diff_t = difftime(now,ui_iter->second.time);
-                            tm_hour = diff_t / (60*60);
-                            diff_t -= ( tm_hour *60 *60);
+                            int bl_hour;
+                            int diff_t = pkt_header->ts.tv_sec - ui_iter->second.block_time;
+                            bl_hour = diff_t / (60*60);
+                            diff_t -= ( bl_hour *60 *60);
 
-                            //if(tm_hour>3)
-                            if(true)
+                            if(bl_hour>2)   //http_injection이 실행된 지 2시간이 경과했으면 실행
+                            //if(true)
                             {
                                 uint16_t etype = ntohs(eh->ether_type);
                                 if(etype == ETHERTYPE_IP)
@@ -159,47 +133,45 @@ int main(int argc, char *argv[])
                                         if(pkt_length >0)
                                         {
                                             string output(reinterpret_cast<char const*>(pkt_data), pkt_length);
-                                            smatch m;
-                                            bool match = regex_search(output,m,re);
-                                            if((match))
+                                            string sCmp = "GET";
+                                            if(output.find(sCmp))      //TCP DATA에서 GET을 찾은 위치가 0번째 일경우
                                             {
-                                                tcph->th_flags = 0x11;
-                                                pkt_data -= sizeof(struct ether_header)+iph->ip_hl*4+tcph->doff*4;
-                                                if(pcap_sendpacket(fp,pkt_data,pkt_header->len)!=0)
-                                                {
-                                                    fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
-                                                }
-                                                cout<<"SEND_FIN_PACKET"<<endl;
+                                                if(http_injection())
+                                                    ui_iter->second.block_time = pkt_header->ts.tv_sec; //http_injection의 정상 실행됐을 경우, block_time을 실행한 시간으로 갱신한다.
                                             }
                                         }
                                     }
-
                                 }
                             }
+                            ui_iter->second.last_time = pkt_header->ts.tv_sec;  //마지막으로 연결된 이후의 시간을 패킷이 들어온 시간으로 갱신한다.
                         }
                         else
                         {
-                            time(&uiv.time);
+                            uiv.block_time = pkt_header->ts.tv_sec;     //block_time을 패킷이 들어온 시간으로 설정
+                            uiv.last_time = pkt_header->ts.tv_sec;      //last_time을 패킷이 들어온 시간으로 설정
                             user_info.insert(pair<Mac, user_info_value>(user_mac,uiv));
-                        }   //이미 등록이 되어있는 지 조건문
-                    }   //ap mac주소가 일치하는지 조건문
-                }
-                /*
+
+                            http_injection();
+                        }   //user_mac이 없을 경우, MAP에 추가해주고 http_injection을 실행한다.
+                    }   //ap mac주소가 일치하는지 if문
+                }   //패킷을 정상적으로 받아 왔을 경우 실행되는 else문
                 sleep(1);
                 system("clear");
-                cout<<"User_Mac\t\tAfter Connection Time"<<endl;
+                cout<<"User_Mac\t\tAfter Block Time\tLast Connection Time"<<endl;
                 for(ui_iter = user_info.begin(); ui_iter!=user_info.end(); advance(ui_iter,1))
                 {
-                    for(i=0;i<5;i++)
+                    if(pkt_header->ts.tv_sec - ui_iter->second.last_time > 1800)    //마지막으로 연결된 이후의 시간이 30분이 지나면 해당 MAP을 삭제한다
+                        user_info.erase(ui_iter++);
+                    for(int i=0;i<5;i++)
                         printf("%02x:",ui_iter->first.mac_address[i]); //beacon info key(bssid)
                     printf("%02x\t",ui_iter->first.mac_address[5]);
-                    print_time(ui_iter->second.time);
+                    print_time(ui_iter->second.block_time,pkt_header->ts);  //http_injection 이 실행된 이후의 시간을 출력
+                    cout<<"\t\t";
+                    print_time(ui_iter->second.last_time,pkt_header->ts);   //마지막으로 연결된 이후의 시간을 출력
                     cout<<endl;
                 }
-                */
-
-            }   //pcap_open_live 함수 while문
-        }
-    }
+            }   //pcap_next_ex 함수 while문
+        }   //pcap_open의 반환값이 0 이상일 경우 실행되는 else문
+    }   //tap0에 정상적으로 패킷이 유입될 경우 실행되는 else문
     return 0;
 }

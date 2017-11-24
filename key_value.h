@@ -2,7 +2,8 @@
 #define KEY_VALUE_H
 #pragma pack(push,1)
 struct user_info_value{
-    time_t time;
+    int last_time;
+    int block_time;
 };
 #pragma pack(pop)
 
