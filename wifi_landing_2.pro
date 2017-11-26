@@ -5,9 +5,10 @@ CONFIG -= qt
 LIBS += -lpcap
 
 SOURCES += main.cpp \
-    mac.cpp
+    mac.cpp \
+    http_injection.cpp
 
 HEADERS += \
     mac.h \
-    mac.h \
-    key_value.h
+    key_value.h \
+    http_injection.h
