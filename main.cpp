@@ -54,6 +54,7 @@ int main(int argc, char *argv[])
     char *dev =  argv[1];
     uint8_t ap_mac[6];
     mac_changer(argv[2],ap_mac);
+    const char *send_dev = "wlan0";
 
     map<Mac,user_info_value>user_info;
     map<Mac,user_info_value>::iterator ui_iter;
@@ -79,13 +80,17 @@ int main(int argc, char *argv[])
         int res;
         int pkt_length;
         int jump_pointer;
-        pcap_t *fp;
+        pcap_t *fp,*fp2;
         if((fp= pcap_open_live(dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , -1, errbuf)) == NULL)
             {
                 fprintf(stderr,"Unable to open the adapter. %s is not supported by Pcap\n", dev);
             }
         else
         {
+            if((fp2= pcap_open_live(send_dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , -1, errbuf)) == NULL)
+                {
+                    fprintf(stderr,"Unable to open the adapter. %s is not supported by Pcap\n", send_dev);
+                }
             while((res=pcap_next_ex(fp,&pkt_header,&pkt_data))>=-1)
             {
                 if(res == 0)continue;

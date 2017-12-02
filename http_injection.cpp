@@ -18,6 +18,16 @@ struct Pseudoheader{
     uint16_t TCPLen;
 };
 #pragma pack(pop)
+const u_char redirection[57] = {
+    0x48,0x54,0x54,0x50,0x2f,0x31,0x2e,0x30,0x20,0x33,
+    0x30,0x32,0x20,0x52,0x65,0x64,0x69,0x72,0x65,0x63,
+    0x74,0x0d,0x0a,0x4c,0x6f,0x63,0x61,0x74,0x69,0x6f,
+    0x6e,0x3a,0x20,0x68,0x74,0x74,0x70,0x3a,0x2f,0x2f,
+    0x77,0x61,0x72,0x6e,0x69,0x6e,0x67,0x2e,0x6f,0x72,
+    0x2e,0x6b,0x72,0x0d,0x0a,0x0d,0x0a
+};
+const char* attacker = "f6:8c:0e:a6:39:b8";
+
 uint16_t calculate(uint16_t* data, int dataLen)
 {
     uint16_t result;
@@ -91,15 +101,56 @@ uint16_t calIPChecksum(const uint8_t* data)
 
     return checksum;
 }
-bool http_injection(pcap_t *fp,const u_char *pkt_data,int pkt_length){
+bool http_injection(pcap_t *fp, const u_char *pkt_data,int pkt_length){
 
-    struct ether_header *eh;
-    struct ip *iph;
-    struct tcphdr *tcph;
+    struct ether_header *eh,*ceh;
+    struct ip *iph,*ciph;
+    struct tcphdr *tcph,*ctcph;
+
+    u_char *copy_data = new u_char[pkt_length];
+    memcpy(copy_data,pkt_data,pkt_length);
+    //Setting FIN packet
 
     eh = (struct ether_header*)pkt_data;
+    ceh = (struct ether_header*)copy_data;
 
-    const char* attacker = "f6:8c:0e:a6:39:b8";
+    memcpy(ceh->ether_dhost,eh->ether_shost,ETH_ALEN);
+    memcpy(ceh->ether_shost,eh->ether_dhost,ETH_ALEN);
+
+    pkt_data += sizeof(struct ether_header);
+    copy_data += sizeof(struct ether_header);
+    pkt_length -= sizeof(struct ether_header);
+
+    iph = (struct ip*)pkt_data;
+    ciph = (struct ip*)copy_data;
+    tcph = (struct tcphdr*)(pkt_data+iph->ip_hl*4);
+    ctcph = (struct tcphdr*)(copy_data+ciph->ip_hl*4);
+
+    int jump_pointer = sizeof(struct ether_header)+ciph->ip_hl*4+ctcph->doff*4;
+
+    ciph->ip_dst = iph->ip_src;
+    ciph->ip_src = iph->ip_dst;
+    ciph->ip_len = htons(ciph->ip_hl*4+ctcph->doff*4+57);
+    ciph->ip_sum = calIPChecksum(pkt_data);
+
+    ctcph->th_flags = 0x19;
+    ctcph->th_seq = tcph->th_ack;
+    ctcph->th_ack = htonl(ntohl(tcph->seq)+(pkt_length-(ciph->ip_hl*4+ctcph->doff*4)));
+    ctcph->th_dport = tcph->th_sport;
+    ctcph->th_sport = tcph->th_dport;
+    memcpy(copy_data+ciph->ip_hl*4+ctcph->doff*4,redirection,57);
+    ctcph->th_sum = calTCPChecksum(copy_data,ciph->ip_hl*4+ctcph->doff*4+57);
+
+    pkt_data -= sizeof(struct ether_header);
+    copy_data -= sizeof(struct ether_header);
+    if(pcap_sendpacket(fp,copy_data,jump_pointer+57))
+    {
+        fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
+        return false;
+    }
+    //Setting RST packet
+    eh = (struct ether_header*)pkt_data;
+
     mac_changer(attacker,eh->ether_shost);
 
     pkt_data += sizeof(struct ether_header);
@@ -111,7 +162,7 @@ bool http_injection(pcap_t *fp,const u_char *pkt_data,int pkt_length){
     iph->ip_len = htons(iph->ip_hl*4+tcph->doff*4);
     iph->ip_sum = calIPChecksum(pkt_data);
 
-    int jump_pointer = sizeof(struct ether_header)+iph->ip_hl*4+tcph->doff*4;
+    jump_pointer = sizeof(struct ether_header)+iph->ip_hl*4+tcph->doff*4;
 
     tcph->th_flags = 0x14;
     tcph->seq = htonl(ntohl(tcph->seq)+(pkt_length-(iph->ip_hl*4+tcph->doff*4)));
@@ -120,70 +171,7 @@ bool http_injection(pcap_t *fp,const u_char *pkt_data,int pkt_length){
     pkt_data -= sizeof(struct ether_header);
     pkt_length += sizeof(struct ether_header);
 
-
-/*
-
-    struct ether_header *eh;
-    struct ip *iph;
-    struct tcphdr *tcph;
-
-    eh = (struct ether_header*)pkt_data;
-
-    const char* attacker = "f6:8c:0e:a6:39:b8";
-    mac_changer(attacker,eh->ether_shost);
-    pkt_data += sizeof(struct ether_header);
-    pkt_length -= sizeof(struct ether_header);
-
-    iph = (struct ip*)pkt_data;
-    tcph = (struct tcphdr*)(pkt_data+iph->ip_hl*4);
-
-    int jump_pointer = sizeof(struct ether_header)+iph->ip_hl*4+tcph->doff*4;
-
-    iph->ip_len = htons(iph->ip_hl*4+tcph->doff*4);
-    iph->ip_sum = 0;
-    uint16_t ip_checksum=calculate((uint16_t*)iph,iph->ip_hl*4);
-    iph->ip_sum=htons(ip_checksum^0xffff);//xor checksum
-    tcph->th_flags = 0x14;
-    tcph->seq = htonl(ntohl(tcph->seq)+(pkt_length-(iph->ip_hl*4+tcph->doff*4)));
-
-    struct Pseudoheader pseudoheader; //saved by network byte order
-
-    //init Pseudoheader
-    memcpy(&pseudoheader.srcIP,&iph->ip_src,sizeof(pseudoheader.srcIP));
-    memcpy(&pseudoheader.destIP,&iph->ip_dst,sizeof(pseudoheader.destIP));
-    pseudoheader.protocol=iph->ip_p;
-    pseudoheader.TCPLen=htons(tcph->doff*4);
-
-    //Cal pseudoChecksum
-    uint16_t pseudoResult=calculate((uint16_t*)&pseudoheader,sizeof(pseudoheader));
-
-    //Cal TCP Segement Checksum
-    tcph->check=0; //set Checksum field 0
-    uint16_t tcpHeaderResult=calculate((uint16_t*)tcph,ntohs(pseudoheader.TCPLen));
-
-    uint16_t checksum;
-    int tempCheck;
-
-    if((tempCheck=pseudoResult+tcpHeaderResult)>CARRY)
-        checksum=(tempCheck-CARRY) +1;
-    else
-        checksum=tempCheck;
-    checksum=ntohs(checksum^0xffff); //xor checksum
-    tcph->check=checksum;
-
-    pkt_data -= sizeof(struct ether_header);
-    pkt_length += sizeof(struct ether_header);
-*/
-    pcap_t *fp2;
-    const char* dev = "wlan0";
-    char *errbuf;
-
-    if((fp2= pcap_open_live(dev, BUFSIZ, 1 , 1, errbuf)) == NULL)
-        {
-            fprintf(stderr,"Unable to open the adapter. %s is not supported by Pcap\n", dev);
-            printf("ERROR CODE : %s",errbuf);
-        }
-    else if(pcap_sendpacket(fp2,pkt_data,jump_pointer))
+    if(pcap_sendpacket(fp,pkt_data,jump_pointer))
     {
         fprintf(stderr,"\nError sending the packet: %s\n", pcap_geterr(fp));
         return false;
