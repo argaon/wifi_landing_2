@@ -38,7 +38,17 @@ void print_time(int input_time,struct timeval tv)
 
     printf("%d시간 %d분 %d초",tm_hour,tm_min,tm_sec);
 }
-
+/*void get_my_addr(const char*ifname,uint8_t*outputmymac)
+{
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if(s < 0)
+        perror("socket fail");
+    struct ifreq ifr;
+    strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+    if(ioctl(s, SIOCGIFHWADDR, &ifr) < 0)
+        perror("ioctl fail");
+    memcpy(outputmymac,ifr.ifr_hwaddr.sa_data,6);
+}*/
 int main(int argc, char *argv[])
 {
     char *dev =  argv[1];
@@ -70,7 +80,7 @@ int main(int argc, char *argv[])
         int pkt_length;
         int jump_pointer;
         pcap_t *fp;
-        if((fp= pcap_open_live(dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , 1, errbuf)) == NULL)
+        if((fp= pcap_open_live(dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , -1, errbuf)) == NULL)
             {
                 fprintf(stderr,"Unable to open the adapter. %s is not supported by Pcap\n", dev);
             }
@@ -84,7 +94,7 @@ int main(int argc, char *argv[])
                     pcap_close(fp);
                     printf("%s is down, after 1sec, restart!\n",dev);
                     sleep(1);
-                    if((fp= pcap_open_live(dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , 1, errbuf)) == NULL)fprintf(stderr,"Unable to open the adapter. %s is not supported by Pcap\n", dev);
+                    if((fp= pcap_open_live(dev, BUFSIZ, PCAP_OPENFLAG_PROMISCUOUS , -1, errbuf)) == NULL)fprintf(stderr,"Unable to open the adapter. %s is not supported by Pcap\n", dev);
                     //pcap_datalink(fp);
                 }
                 else
@@ -126,15 +136,15 @@ int main(int argc, char *argv[])
                                         jump_pointer = sizeof(struct ether_header)+iph->ip_hl*4+tcph->doff*4;
                                         if(pkt_length >0)
                                         {
-                                            string output(reinterpret_cast<char const*>(pkt_data), pkt_length);
-                                            string sCmp = "GET";
-                                            if(output.find(sCmp))      //TCP DATA에서 GET을 찾은 위치가 0번째 일경우
+                                            u_int32_t *u32_get;
+                                            u32_get = (u_int32_t*)pkt_data;
+                                            if(ntohl(*u32_get) == 0x47455420)      //TCP DATA가 GET 일경우
                                             {
-                                                printf("find get\n");
                                                 pkt_data -= jump_pointer;   //http_injection을 하기 위해서 패킷 포인터를 원래대로 셋팅한다
                                                 pkt_length += jump_pointer;
                                                 if(http_injection(fp,pkt_data,pkt_length)==1)
-                                                    ui_iter->second.block_time = pkt_header->ts.tv_sec; //http_injection의 정상 실행됐을 경우, block_time을 실행한 시간으로 갱신한다.
+                                                    printf("injection!\n");
+                                                    //ui_iter->second.block_time = pkt_header->ts.tv_sec; //http_injection의 정상 실행됐을 경우, block_time을 실행한 시간으로 갱신한다.
                                             }
                                         }
                                     }
