@@ -14,5 +14,6 @@ class Mac
     }
     Mac();
 };
-
+uint8_t mac_changer(const char *ipm,uint8_t *opm);
+void get_my_addr(const char*ifname,char* outputmyip,uint8_t*outputmymac);
 #endif // MAC_H

